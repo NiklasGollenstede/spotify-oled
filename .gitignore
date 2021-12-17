@@ -1,6 +1,5 @@
-config.ini
-venv/
-
-.idea/*
-*.out
-.cache-*
+/venv/
+/.idea/
+/*.out
+/.cache-115937451
+/result

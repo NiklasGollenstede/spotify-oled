@@ -13,5 +13,5 @@ setup(
         'luma.oled>=3.4.0',
         'Pillow>=8.2.0'
     ],
-    scripts=['Spotify_OLED_Control.py']
+    scripts=['spotify-oled.py']
 )
