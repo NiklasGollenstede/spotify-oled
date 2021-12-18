@@ -1,5 +1,11 @@
 /venv/
 /.idea/
 /*.out
-/.cache-115937451
 /result
+/build
+/dist
+/*.egg-info
+
+/config.ini
+/auth.cache
+/.cache-*

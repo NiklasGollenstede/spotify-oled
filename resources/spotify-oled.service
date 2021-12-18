@@ -1,15 +1,27 @@
 [Install]
+# Start as part of system boot:
 WantedBy=multi-user.target
 
 [Unit]
-Description=Spotify oled service
+Description=Spotify-OLED service
+# Don't start before the network is (considered to be) online:
 Wants=network-online.target
 After=network-online.target
 
+# Since the script may exit at any time on temporary failures (no internet, display disconnected, etc), just keep restarting (see below):
+StartLimitIntervalSec=0
+
 [Service]
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/Spotify-OLED-Control
-ExecStartPre=/bin/sleep 10
-ExecStart=/home/pi/Spotify-OLED-Control/Spotify-OLED-Control.py
-Type=simple
+# The only access this needs is interrnet, the i2s or spi bus, read access to the sources and the `config.ini`, plus read write access to the `credentials.cache_path`.
+# If the sources are world readable (and preferably only writable by root), and the `cache_path` file can be read and written to by the `i2c` group, then this is (very restrictive and) sufficient:
+DynamicUser=yes
+Group=i2c
+ReadWritePaths=/var/local/spotify-oled.auth
+
+# These two paths will depend on how/where spotify-oled was installed/configured:
+ExecStart=/opt/spotify-oled/spotify-oled.py --config=/etc/spotify-oled.ini
+# COuld also be: /usr/local/bin/spotify-oled.py
+
+# Keep restarting (see above), but don't go too crazy:
+Restart=always
+RestartSec=10

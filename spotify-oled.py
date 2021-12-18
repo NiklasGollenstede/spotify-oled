@@ -16,9 +16,9 @@ from luma.core.render import canvas as Canvas
 from luma.oled import device as devices
 
 
-def _():
+def try_setup_gpio():
     try:
-        # TODO: What does this do, and (when) is it required / specific to the display/interface?
+        # What does this do, and (when) is it required / specific to the display/interface?
         from RPi import GPIO
         clk = 17 ; dt = 18 ; btn = 27
         GPIO.setmode(GPIO.BCM)
@@ -28,7 +28,6 @@ def _():
         GPIO.input(clk)
     except Exception as error:
         print("Applying GPIO settings failed, but that may be fine: " + str(error.args[0]))
-_() ; del _
 
 
 class AuthConfig:
@@ -39,17 +38,21 @@ class AuthConfig:
         self.cache_path = credentials['cache_path'] if credentials.get('cache_path', None) else '.cache-{}'.format(credentials['username'])
 
 class ContentConfig:
-    def __init__(self, content: 'dict[str, str]'):
-        self.scroll_speed       = int(content.get('scroll_speed',        3))
-        self.scroll_back_speed  = int(content.get('scroll_back_speed',   6))
-        self.scroll_rest_time   = int(content.get('scroll_rest_time',   15))
-        self.song_font_size     = int(content.get('song_font_size',     22))
-        self.artist_font_size   = int(content.get('artist_font_size',   18))
-        self.seek_font_size     = int(content.get('seek_font_size',     10))
-        self.min_frame_time     = int(content.get('min_frame_time',    200))
-        self.data_poll_sleep    = int(content.get('data_poll_sleep',  2000))
+    def __init__(self, cfg: 'dict[str, str]', device: 'devices.device|None'):
+        self.scroll_speed       = int(cfg.get('scroll_speed',       30))
+        self.scroll_back_speed  = int(cfg.get('scroll_back_speed',   0))
+        self.scroll_rest_time   = int(cfg.get('scroll_rest_time', 1500))
+        self.song_font_size     = int(cfg.get('song_font_size',     22))
+        self.artist_font_size   = int(cfg.get('artist_font_size',   18))
+        self.seek_font_size     = int(cfg.get('seek_font_size',     10))
+        self.min_frame_time     = int(cfg.get('min_frame_time',    200))
+        self.data_poll_sleep    = int(cfg.get('data_poll_sleep',  2000))
+        self.screen_width       = int(cfg.get('screen_width',    device.width if device else 128))
+        self.screen_height      = int(cfg.get('screen_height',   device.height if device else 64))
 
-        font_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "fonts", 'cour.ttf'))
+        self.font_file = cfg.get('font_file', 'cour.ttf')
+        font_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'fonts', self.font_file))
+        #if not os.path.exists(font_path): font_path = pkg_resources.resource_filename(__name__, 'fonts' + os.path.sep + self.font_file) # (this doesn't work ...)
         self.title_font = ImageFont.truetype(font_path, self.song_font_size)
         self.content_font = ImageFont.truetype(font_path, self.artist_font_size)
         self.seekbar_font = ImageFont.truetype(font_path, self.seek_font_size)
@@ -97,52 +100,93 @@ class PlaybackError:
         return self.title == other.title and self.message == other.message
 
 
-class ScrollingText:
-    def __init__(self, text: str, start: int, font: ImageFont.FreeTypeFont):
-        self.text = text ; self.start = start ; self.now = 0 ; self.font = font
-        self.width, _ = dummy_screen.textsize(text, font=font)
+class UiContent:
+    def __init__(self, pb: 'PlaybackInfo|None', error: 'PlaybackError|None'):
+        self.pb = pb ; self.error = error
+        self.title = error.title if error else pb.track if pb else ''
+        self.content = error.message if error else ', '.join(pb.artists) if pb else ''
+        self.now = round(time.time() * 1000)
 
-    def update(self, now: int):
-        self.now = now
 
-    def draw(self, draw: ImageDraw, top: int):
-        offset = 0 # TODO: actually make this scroll again
-        draw.text((-offset, top), self.text, font=self.font, fill="white")
+class UiElement:
+    def __init__(self, cfg: ContentConfig, content: UiContent, args: 'dict[str,any]'): pass
+    def update(self, content: UiContent, now: int): pass
+    def draw(self, draw: ImageDraw, now: int): pass
+
+
+class ScrollingText (UiElement):
+
+    def __init__(self, cfg: ContentConfig, content: UiContent, args: 'dict[str,any]'):
+        self.cfg = cfg
+        self.source = str(args.get('source', 'title')) ; self.font = getattr(cfg, self.source + '_font')
+        self.left = int(args.get('left', 0))
+        self.top = int(args.get('top', 0))
+        self.width = cfg.screen_width
+        self.text = '\0' ; self.update(content, round(time.time() * 1000))
+
+    def update(self, content: UiContent, now: int):
+        current = str(getattr(content, self.source))
+        if self.text == current: return
+        self.start = now ; self.text = current
+        self.text_width, _ = dummy_screen.textsize(self.text, font=self.font)
+        self.overflow = self.text_width > self.width
+        self.scroll_fw_time = int((self.text_width - self.width) / self.cfg.scroll_speed * 1000) if self.overflow and self.cfg.scroll_speed > 0 else 0
+        self.scroll_bk_time = int((self.text_width - self.width) / self.cfg.scroll_back_speed * 1000) if self.overflow and self.cfg.scroll_back_speed > 0 else 0
+        self.cycle_time = self.scroll_fw_time + self.scroll_bk_time + 2 * self.cfg.scroll_rest_time
+
+    def draw(self, draw: ImageDraw, now: int):
+        offset = 0 ; run_time = 0
+        if self.overflow:
+            run_time = (now - self.start) % self.cycle_time
+            if run_time < self.cfg.scroll_rest_time:
+                offset = 0
+            elif run_time < self.cfg.scroll_rest_time + self.scroll_fw_time:
+                offset = int((run_time - self.cfg.scroll_rest_time) * self.cfg.scroll_speed / 1000)
+            elif run_time < self.cfg.scroll_rest_time + self.scroll_fw_time + self.cfg.scroll_rest_time:
+                offset = self.text_width - self.width
+            else:
+                offset = self.text_width - self.width - int((run_time - self.scroll_fw_time - 2 * self.cfg.scroll_rest_time) * self.cfg.scroll_back_speed / 1000)
+        draw.text((self.left - offset, self.top), self.text, font=self.font, fill="white")
 
 dummy_screen = ImageDraw(Image.new('1', (1, 1))) # screen type shouldn't matter here
 
 
-class ProgressBar:
+class ProgressBar (UiElement):
 
-    def __init__(self, cfg: ContentConfig, pb: PlaybackInfo):
-        self.cfg = cfg ; self.pb = pb ; self.now = 0
-        self.duration = format_mm_ss(pb.duration)
+    def __init__(self, cfg: ContentConfig, content: UiContent, args: 'dict[str,any]'):
+        self.cfg = cfg
+        self.width = int(args.get('width', cfg.screen_width))
         self.height = cfg.seek_font_size + 2
+        self.left = int(args.get('left', 0))
+        self.top = int(args.get('top', cfg.screen_height - self.height))
         self.padding = int(cfg.seek_font_size * 3.3) + 2
+        self.update(content, round(time.time() * 1000))
 
-    def update(self, now: int):
-        self.now = now
+    def update(self, content: UiContent, now: int):
+        self.pb = content.pb
+        self.duration = format_mm_ss(self.pb.duration) if self.pb else None
 
-    def draw(self, draw: ImageDraw, width: int, top: int):
+    def draw(self, draw: ImageDraw, now: int):
+        if self.pb == None: return
 
-        #draw.rectangle(((0), (top), (width - 1), (top + self.height - 1)), "black", "white", 1) # outline
+        #draw.rectangle(((0), (self.top), (self.width - 1), (self.top + self.height - 1)), "black", "white", 1) # outline
 
-        progress = self.pb.progress if self.pb.paused else self.now - self.pb.started
+        progress = self.pb.progress if self.pb.paused else now - self.pb.started
         if progress > self.pb.duration: progress = self.pb.duration
 
         if self.pb.paused:
-            draw_paused(draw, self.height, width / 2, top)
+            draw_paused(draw, self.height, self.width / 2, self.top)
         elif self.pb.volume == 0:
-            draw_muted(draw, width / 2, top)
+            draw_muted(draw, self.width / 2, self.top)
         else: # progress bar
-            draw.rectangle(((self.padding + 0), (top + 3), (width - self.padding), (top + self.height - 4)), "black", "white", 1) # outline
-            length = width - 2 * (self.padding + 1)
+            draw.rectangle(((self.padding + 0), (self.top + 3), (self.width - self.padding), (self.top + self.height - 4)), "black", "white", 1) # outline
+            length = self.width - 2 * (self.padding + 1)
             fill = round(progress / self.pb.duration * length)
-            draw.rectangle(((self.padding + 1), (top + 3), (self.padding + 1 + fill), (top + self.height - 4)), "white", "white", 1)
+            draw.rectangle(((self.padding + 1), (self.top + 3), (self.padding + 1 + fill), (self.top + self.height - 4)), "white", "white", 1)
 
         # (here?) text with a `1` in it is rendered one pixel too high ...
-        txt = format_mm_ss(progress) ; draw.text((0, top + (1 if '1' in txt else 0)), txt, font=self.cfg.seekbar_font, fill="white")
-        draw.text((width - self.padding + 5, top + (1 if '1' in self.duration else 0)), self.duration, font=self.cfg.seekbar_font, fill="white")
+        txt = format_mm_ss(progress) ; draw.text((0, self.top + (1 if '1' in txt else 0)), txt, font=self.cfg.seekbar_font, fill="white")
+        draw.text((self.width - self.padding + 5, self.top + (1 if '1' in self.duration else 0)), self.duration, font=self.cfg.seekbar_font, fill="white")
 
 
 def format_mm_ss(ms: int):
@@ -169,43 +213,35 @@ def draw_muted(draw: ImageDraw, center: int, top: int):
 
 
 class MainUI:
-    def __init__(self, device: devices.device, cfg: ContentConfig):
+    def __init__(self, device: 'devices.device|None', cfg: ContentConfig):
         self.device = device ; self.cfg = cfg
-        self.set(None, None)
+        self.content = UiContent(None, None)
+        self.elements: list[UiElement] = [ # this could be put into the config file for further customization
+            ScrollingText(self.cfg, self.content, { 'source': 'title',              'left': 0, 'top': 0, }),
+            ScrollingText(self.cfg, self.content, { 'source': 'content',            'left': 0, 'top': cfg.screen_height - 40, }),
+            ProgressBar  (self.cfg, self.content, { 'width': self.cfg.screen_width, 'left': 0, 'top': cfg.screen_height - cfg.seek_font_size - 2, }),
+        ]
         self.thread: 'Thread|None' = None ; self.error: 'Exception|None' = None
 
     def set(self, pb: PlaybackInfo, error: PlaybackError):
-        title = error.title if error else pb.track if pb else ''
-        content = error.message if error else ', '.join(pb.artists) if pb else ''
-        now = round(time.time() * 1000)
-        if not hasattr(self, 'title') or self.title.text != title:
-            self.title = ScrollingText(title, now, self.cfg.title_font)
-        if not hasattr(self, 'content') or self.content.text != content:
-            self.content = ScrollingText(content, now, self.cfg.content_font)
-        #print(self.title.text, '|', self.content.text)
-        self.seekbar = ProgressBar(self.cfg, pb) if pb else None
+        self.content = UiContent(pb, error) ; now = round(time.time() * 1000)
+        for element in self.elements: element.update(self.content, now)
 
     def run(self):
         try:
             while self.thread != None:
-
                 now = round(time.time() * 1000)
-                self.title.update(now)
-                self.content.update(now)
-                if self.seekbar: self.seekbar.update(now)
-
-                with Canvas(self.device) as draw: self.draw(draw)
-
+                if self.device:
+                    with Canvas(self.device) as draw: self.draw(draw, now)
+                else:
+                    self.draw(ImageDraw(Image.new('1', (self.cfg.screen_width, self.cfg.screen_height))), now)
                 then = now ; now = round(time.time() * 1000)
                 time.sleep((self.cfg.min_frame_time - (now - then)) / 1000)
-
         except Exception as error:
             self.error = error
 
-    def draw(self, draw: ImageDraw):
-        self.title.draw(draw, 0)
-        self.content.draw(draw, self.device.height - 40)
-        if self.seekbar: self.seekbar.draw(draw, self.device.width, self.device.height - self.seekbar.height)
+    def draw(self, draw: ImageDraw, now: int):
+        for element in self.elements: element.draw(draw, now)
 
     def __enter__(self): self.start() ; return self
     def start(self):
@@ -277,13 +313,15 @@ def strip_artists_from_track(track: str, artists: 'list[str]'):
 
 def main():
 
-    parser = argparse.ArgumentParser(description="Service that displays the authenticated user's current Spotify playback on an i2c/spi OLED display.", allow_abbrev=False)
+    parser = argparse.ArgumentParser(description="Service showing Spotify's currently playing song on an i²c or spi display.", allow_abbrev=False)
     parser.add_argument('--config', type=str, help="path to config file, defaults to ./config.ini", default='./config.ini')
     parser.add_argument('--auth', action='store_true', help="do user authentication (which is interactive if not already cached), then exit instead of continuing to drive the display")
+    parser.add_argument('--headless', action='store_true', help="don't actually use a display, instead do any drawing on a canvas that gets discarded")
     args = parser.parse_args()
 
     configParser = configparser.ConfigParser() ; configParser.read(args.config)
     config = { key: dict(configParser.items(key)) for key in configParser.sections() }
+    #print(json.dumps(config))
 
     if args.auth:
         cfg = AuthConfig(config['credentials'])
@@ -292,14 +330,18 @@ def main():
         print("Authentication successfull")
         return
 
-    screen_cfg = config['screen']
-    if screen_cfg['type'] == 'spi':
-        serial = spi(device=int(screen_cfg.get('device_num', 0)), port=int(screen_cfg.get('port_num', 1)))
+    if args.headless:
+        device = None
     else:
-        serial = i2c(port=int(screen_cfg.get('port_num', 1)), address=int(screen_cfg.get('address', 0x3C), 0))
-    device: devices.device = getattr(devices, screen_cfg['device'])(serial)
+        try_setup_gpio()
+        screen_cfg = config['screen']
+        if screen_cfg['type'] == 'spi':
+            serial = spi(device=int(screen_cfg.get('device_num', 0)), port=int(screen_cfg.get('port_num', 1)))
+        else:
+            serial = i2c(port=int(screen_cfg.get('port_num', 1)), address=int(screen_cfg.get('address', 0x3C), 0))
+        device: 'devices.device|None' = getattr(devices, screen_cfg['device'])(serial)
 
-    cfg = ContentConfig(config.get('content', { }))
+    cfg = ContentConfig(config.get('content', { }), device)
 
     spotify = SpotifyDataProvider(AuthConfig(config['credentials']))
     prev_data: 'PlaybackInfo|None' = None
