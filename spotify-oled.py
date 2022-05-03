@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse ; import configparser
-import os ; import time
+import os ; import sys ; import time
 import re ; import json
 from threading import Thread
 
@@ -146,6 +146,8 @@ class ScrollingText (UiElement):
                 offset = self.text_width - self.width
             else:
                 offset = self.text_width - self.width - int((run_time - self.scroll_fw_time - 2 * self.cfg.scroll_rest_time) * self.cfg.scroll_back_speed / 1000)
+        else:
+            offset = int((self.text_width - self.width) / 2) # <= 0
         draw.text((self.left - offset, self.top), self.text, font=self.font, fill="white")
 
 dummy_screen = ImageDraw(Image.new('1', (1, 1))) # screen type shouldn't matter here
@@ -236,7 +238,7 @@ class MainUI:
                 else:
                     self.draw(ImageDraw(Image.new('1', (self.cfg.screen_width, self.cfg.screen_height))), now)
                 then = now ; now = round(time.time() * 1000)
-                time.sleep((self.cfg.min_frame_time - (now - then)) / 1000)
+                time.sleep(max(0, (self.cfg.min_frame_time - (now - then))) / 1000)
         except Exception as error:
             self.error = error
 
@@ -285,13 +287,14 @@ class SpotifyDataProvider:
 
     def poll_safe(self) -> 'tuple[PlaybackInfo, None] | tuple[None, PlaybackError]':
         try:
-            pb = self.poll()
-            if pb != None: return (pb, None)
-            return (None, PlaybackError("Stopped", ""))
-        except EOFError: # tries to ask for user input without stdin
-            return (None, PlaybackError("No Auth", "Interactive login required"))
+            try:
+                pb = self.poll()
+                if pb != None: return (pb, None)
+                return (None, PlaybackError("Stopped", ""))
+            except EOFError: # tries to ask for user input without stdin
+                return (None, PlaybackError("No Auth", "Interactive login required"))
         except Exception as raw:
-            try: message = str(raw.args[0])
+            try: message = type(raw).__name__ + ': ' + ' '.join(map(str, raw.args))
             except: message = '<no description>'
             return (None, PlaybackError("Unhandled Exception", message))
 
@@ -302,7 +305,7 @@ def strip_artists_from_track(track: str, artists: 'list[str]'):
     """
     # make sure there are none of the (unprintable) placeholders used already
     track = re.sub(r'[\0-\x1f]', '', track)
-    # supstitute artist names with matchable placeholders
+    # substitute artist names with matchable placeholders
     for i in range(min(len(artists), 0x1f)):
         track = track.replace(artists[i], chr(i))
     # remove placeholders in and including prentices
@@ -319,6 +322,10 @@ def main():
     parser.add_argument('--headless', action='store_true', help="don't actually use a display, instead do any drawing on a canvas that gets discarded")
     args = parser.parse_args()
 
+    if not os.path.exists(args.config):
+        print("Config file {} does not exist!".format(args.config))
+        return 1
+
     configParser = configparser.ConfigParser() ; configParser.read(args.config)
     config = { key: dict(configParser.items(key)) for key in configParser.sections() }
     #print(json.dumps(config))
@@ -328,7 +335,7 @@ def main():
         print("Ensuring authentication (cache path: {}):".format(cfg.cache_path))
         SpotifyDataProvider(cfg).poll()
         print("Authentication successfull")
-        return
+        return 0
 
     if args.headless:
         device = None
@@ -360,5 +367,5 @@ def main():
             ui.test()
 
 if __name__ == "__main__":
-    try: main()
+    try: sys.exit(main())
     except KeyboardInterrupt: print("Exiting")

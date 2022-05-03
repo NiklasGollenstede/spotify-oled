@@ -7,8 +7,8 @@
     flake-utils = { url = "github:numtide/flake-utils/master"; };
 
 }; outputs = inputs @ { self, ... }: let
-    overlay = pkgs: prev: {
-        inherit (import ./default.nix { inherit pkgs; }) spotify-oled spotify-oled-interpreter;
+    overlay = final: prev: {
+        inherit (import ./default.nix { pkgs = final; }) spotify-oled spotify-oled-interpreter;
     };
     nixosModule = import ./module.nix;
 in inputs.flake-utils.lib.eachDefaultSystem (system: let
@@ -22,5 +22,5 @@ in {
     inherit devShell defaultApp;
     defaultPackage = pkgs.spotify-oled; packages = { inherit (pkgs) spotify-oled spotify-oled-interpreter; };
 }) // {
-    inherit overlay nixosModule; overlays = [ overlay ]; nixosModules = [ nixosModule ];
+    inherit overlay nixosModule; overlays = { spotify-oled = overlay; }; nixosModules = { spotify-oled = nixosModule; };
 }; }

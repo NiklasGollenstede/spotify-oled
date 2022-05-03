@@ -19,7 +19,7 @@
         propagatedBuildInputs = with pip3; [ spotipy luma-oled pillow luma-core ];
         doCheck = false;
         postPatch = ''
-            # TODO: this (logically) creates a dependency to the unpacked sources, not sure whether that is wise
+            # pretend that we're running in the source directory, to be able to find assets
             substituteInPlace spotify-oled.py \
                 --replace "__file__" "'$src/spotify-oled.py'"
         '';

@@ -12,7 +12,7 @@ After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
-# The only access this needs is interrnet, the i2s or spi bus, read access to the sources and the `config.ini`, plus read write access to the `credentials.cache_path`.
+# The only access this needs is internet, the i2s or spi bus, read access to the sources and the `config.ini`, plus read write access to the `credentials.cache_path`.
 # If the sources are world readable (and preferably only writable by root), and the `cache_path` file can be read and written to by the `i2c` group, then this is (very restrictive and) sufficient:
 DynamicUser=yes
 Group=i2c
@@ -20,8 +20,9 @@ ReadWritePaths=/var/local/spotify-oled.auth
 
 # These two paths will depend on how/where spotify-oled was installed/configured:
 ExecStart=/opt/spotify-oled/spotify-oled.py --config=/etc/spotify-oled.ini
-# COuld also be: /usr/local/bin/spotify-oled.py
+# Could also be: /usr/local/bin/spotify-oled.py
 
 # Keep restarting (see above), but don't go too crazy:
 Restart=always
+StartLimitIntervalSec=0
 RestartSec=10
