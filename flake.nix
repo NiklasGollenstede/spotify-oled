@@ -3,8 +3,8 @@
 ); inputs = {
 
     # To update »./flake.lock«: $ nix flake update
-    nixpkgs = { url = "github:NixOS/nixpkgs/nixos-21.11"; };
-    flake-utils = { url = "github:numtide/flake-utils/master"; };
+    nixpkgs = { url = "github:NixOS/nixpkgs/nixos-23.05"; };
+    flake-utils = { url = "github:numtide/flake-utils"; };
 
 }; outputs = inputs @ { self, ... }: let
     overlay = final: prev: {
@@ -12,15 +12,14 @@
     };
     nixosModule = import ./module.nix;
 in inputs.flake-utils.lib.eachDefaultSystem (system: let
-    pkgs = import inputs.nixpkgs { inherit system; overlays = [ overlay ]; };
-
-    devShell = pkgs.mkShell {
-        buildInputs = with pkgs; [ spotify-oled spotify-oled-interpreter ];
-    };
-    defaultApp = { type = "app"; program = "${pkgs.spotify-oled}/bin/spotify-oled.py"; };
+    pkgs = import inputs.nixpkgs { inherit system; overlays = [ overlay ]; config.allowUnsupportedSystem = true; };
 in {
-    inherit devShell defaultApp;
-    defaultPackage = pkgs.spotify-oled; packages = { inherit (pkgs) spotify-oled spotify-oled-interpreter; };
+    devShells.default = pkgs.mkShell {
+        buildInputs = [ pkgs.spotify-oled pkgs.spotify-oled-interpreter ];
+    };
+    apps.default = { type = "app"; program = "${pkgs.spotify-oled}/bin/spotify-oled.py"; };
+    packages = { inherit (pkgs) spotify-oled spotify-oled-interpreter; default = pkgs.spotify-oled; };
 }) // {
-    inherit overlay nixosModule; overlays = { spotify-oled = overlay; }; nixosModules = { spotify-oled = nixosModule; };
+    overlays = { spotify-oled = overlay; default = overlay; };
+    nixosModules = { spotify-oled = nixosModule; default = nixosModule; };
 }; }

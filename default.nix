@@ -7,21 +7,24 @@
     } // extra);
 
     smbus2    = mkPackage "smbus2"    "0.4.1" "YnbrWZt2xOdDcvJYLSKC8DtDmPDaFryZZgjk8hVXyps=" [ ] { };
-    rpi-gpio  = mkPackage "RPi.GPIO"  "0.7.0" "dCS8bCBUZnZPMPZmwYGHoIJAd9ryCylcQvCK6iy4fT8=" [ ] { doCheck = false; };
-    luma-core = mkPackage "luma.core" "2.3.1" "8pP1//iUbupirzpdXX2lXDfStkqsbJyQGAo4Xan30AM=" (with pip3; [ pillow smbus2 pyftdi cbor2 deprecated rpi-gpio spidev ]) { doCheck = false; };
-    luma-oled = mkPackage "luma.oled" "3.8.1" "qbRF7MaG6UE92sZVVE2iHYAbvGuUYSc2z1koPmuSvLs=" (with pip3; [ luma-core pillow smbus2 pyftdi cbor2 deprecated rpi-gpio spidev ]) { doCheck = false; };
+    rpi-gpio  = mkPackage "RPi.GPIO"  "0.7.1" "zWHEsDw3tiu6SlrP6phidJwzxhjgKV5+kKpHE/s3O3A=" [ ] { doCheck = false; };
+    luma-core = mkPackage "luma.core" "2.4.0" "z1/fNWPV7Fbi95LzovQyq66sUXoLBaEKdXpMWia7Ll0=" (with pip3; [ pillow smbus2 pyftdi cbor2 deprecated rpi-gpio spidev ]) { doCheck = false; };
+    luma-oled = mkPackage "luma.oled" "3.12.0" "r5fXn6NIHSxIt7zPtt40khn22BT9yaPdB1x7LHEgZFA=" (with pip3; [ luma-core pillow smbus2 pyftdi cbor2 deprecated rpi-gpio spidev ]) { doCheck = false; };
 
     python3 = pkgs.python3.withPackages (pip3: with pip3; [ pillow spotipy luma-oled luma-core smbus2 rpi-gpio ]);
 
     spotify-oled = pip3.buildPythonApplication rec {
-        pname = "spotify-oled"; version = "1.0.0";
+        pname = "spotify-oled"; version = "1.0.1";
         src = pkgs.nix-gitignore.gitignoreSourcePure [ ./.gitignore ] ./.;
         propagatedBuildInputs = with pip3; [ spotipy luma-oled pillow luma-core ];
         doCheck = false;
         postPatch = ''
-            # pretend that we're running in the source directory, to be able to find assets
             substituteInPlace spotify-oled.py \
-                --replace "__file__" "'$src/spotify-oled.py'"
+                --replace "'./fonts/'" "'$out/share/fonts/'"
+        '';
+        postInstall = ''
+            mkdir -p $out/share
+            cp -aT ./fonts $out/share/fonts
         '';
         meta = {
             homepage = "https://github.com/NiklasGollenstede/spotify-oled";

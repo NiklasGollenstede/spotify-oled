@@ -11,9 +11,9 @@ setup(
     packages = '.',
     #package_data = {'':[ 'fonts/*.*', ],}, include_package_data = True, # (this doesn't work ...)
     install_requires = [
-        'spotipy>=2.12.0',
-        'luma.oled>=3.4.0',
-        'Pillow>=8.2.0'
+        'spotipy>=2.23.0',
+        'luma.oled>=3.12.0',
+        'Pillow>=9.4.0'
     ],
     scripts = [ 'spotify-oled.py' ],
 )

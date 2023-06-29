@@ -51,7 +51,8 @@ class ContentConfig:
         self.screen_height      = int(cfg.get('screen_height',   device.height if device else 64))
 
         self.font_file = cfg.get('font_file', 'cour.ttf')
-        font_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'fonts', self.font_file))
+        font_path = cfg.get('font_path', './fonts/')
+        font_path = os.path.abspath(os.path.join(os.path.dirname(__file__), font_path, self.font_file))
         #if not os.path.exists(font_path): font_path = pkg_resources.resource_filename(__name__, 'fonts' + os.path.sep + self.font_file) # (this doesn't work ...)
         self.title_font = ImageFont.truetype(font_path, self.song_font_size)
         self.content_font = ImageFont.truetype(font_path, self.artist_font_size)
@@ -128,7 +129,7 @@ class ScrollingText (UiElement):
         current = str(getattr(content, self.source))
         if self.text == current: return
         self.start = now ; self.text = current
-        self.text_width, _ = dummy_screen.textsize(self.text, font=self.font)
+        _, _, self.text_width, _ = dummy_screen.textbbox((0,0), self.text, font=self.font) if self.text else (0, 0, 0, 0)
         self.overflow = self.text_width > self.width
         self.scroll_fw_time = int((self.text_width - self.width) / self.cfg.scroll_speed * 1000) if self.overflow and self.cfg.scroll_speed > 0 else 0
         self.scroll_bk_time = int((self.text_width - self.width) / self.cfg.scroll_back_speed * 1000) if self.overflow and self.cfg.scroll_back_speed > 0 else 0
@@ -320,6 +321,7 @@ def main():
     parser.add_argument('--config', type=str, help="path to config file, defaults to ./config.ini", default='./config.ini')
     parser.add_argument('--auth', action='store_true', help="do user authentication (which is interactive if not already cached), then exit instead of continuing to drive the display")
     parser.add_argument('--headless', action='store_true', help="don't actually use a display, instead do any drawing on a canvas that gets discarded")
+    parser.add_argument('--message', type=str, help="don't actually try to contact spotify, instead display this fixed message forever")
     args = parser.parse_args()
 
     if not os.path.exists(args.config):
@@ -334,7 +336,7 @@ def main():
         cfg = AuthConfig(config['credentials'])
         print("Ensuring authentication (cache path: {}):".format(cfg.cache_path))
         SpotifyDataProvider(cfg).poll()
-        print("Authentication successfull")
+        print("Authentication successful")
         return 0
 
     if args.headless:
@@ -349,6 +351,13 @@ def main():
         device: 'devices.device|None' = getattr(devices, screen_cfg['device'])(serial)
 
     cfg = ContentConfig(config.get('content', { }), device)
+
+    if args.message:
+        with MainUI(device, cfg) as ui:
+            print('Message: ' + args.message)
+            ui.set(None, PlaybackError(args.message, ""))
+            ui.test()
+            time.sleep(9208512000) # max
 
     spotify = SpotifyDataProvider(AuthConfig(config['credentials']))
     prev_data: 'PlaybackInfo|None' = None
